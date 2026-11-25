@@ -72,6 +72,9 @@ constexpr float RISK_ALERT_THRESHOLD = 0.80f; // يدخل DANGER عند 80%
 constexpr float RISK_RESET_THRESHOLD = 0.60f; // يرجع SAFE تحت 60%
 constexpr float RISK_SMOOTH_ALPHA = 0.35f;    // سرعة التدرج كل ثانية
 
+// عدد القراءات المتتالية المطلوبة لتأكيد تغيير الحالة
+constexpr int STATE_CONFIRM_SAMPLES = 4;
+
 // ============================================
 // 4. NETWORK (WOKWI)
 // ============================================
@@ -79,15 +82,15 @@ constexpr float RISK_SMOOTH_ALPHA = 0.35f;    // سرعة التدرج كل ثا
 constexpr bool ENABLE_WEBHOOK = true;
 constexpr bool INSECURE_TLS = true;
 
-const char *WIFI_SSID = "Mi";
-const char *WIFI_PASS = "123456789";
+const char *WIFI_SSID = "MM";
+const char *WIFI_PASS = "12345678";
 
 const char *WEBHOOK_URL =
     "https://n8n-production-6877272c.up.railway.app/webhook/PREDICT-EDGE";
 
 const char *MACHINE_ID = "Motor_01";
 
-// ===========================================  =
+// ============================================
 // 5. TIMING
 // ============================================
 
@@ -162,6 +165,14 @@ volatile State liveState = EdgeStore::STARTUP;
 volatile float latestMlRisk = NAN;
 volatile bool mlReady = false;
 
+// متغيرات تأكيد الحالة بـ 3 قراءات متتالية
+State candidateState = EdgeStore::STARTUP;
+int candidateCount = 0;
+
+// 0 = لا يوجد إرسال جديد، 1 = تم إرسال DANGER بنجاح، 2 = تم إرسال SAFE بنجاح
+volatile uint8_t sentAlertMode = 0;
+volatile bool triggerChimeOnSent = false;
+
 float smoothedRisk = 0.0f;
 bool riskInitialized = false;
 
@@ -182,6 +193,27 @@ const char *stateName(State state)
     default:
         return "STARTUP";
     }
+}
+
+const char *oledRiskLabel(float risk)
+{
+    static const char *currentLabel = "Safe";
+
+    if (!isfinite(risk))
+    {
+        return "FAULT";
+    }
+
+    if (risk >= RISK_ALERT_THRESHOLD)
+    {
+        currentLabel = "Danger";
+    }
+    else if (risk < RISK_RESET_THRESHOLD)
+    {
+        currentLabel = "Safe";
+    }
+
+    return currentLabel;
 }
 
 float clamp01(float x)
@@ -331,75 +363,48 @@ bool readMPU6050AccelG(float &gx, float &gy, float &gz)
 }
 
 // ============================================
-// 8. ALERT TASK
+// 8. ALERT TASK (ONLY AFTER CLOUD SEND SUCCESS)
 // ============================================
 
 void Task_Alert(void *pv)
 {
     (void)pv;
 
-    State lastState = EdgeStore::STARTUP;
-
     for (;;)
     {
-        State current = liveState;
+        uint8_t modeSent = sentAlertMode;
 
-        if (current == EdgeStore::DANGER)
+        // تثبيت الليد حسب آخر داتا تم إرسالها بنجاح حتى يأتي إرسال جديد يغيرها
+        if (modeSent == 1) // DANGER sent
         {
             digitalWrite(BLUE_LED_PIN, LOW);
             digitalWrite(RED_LED_PIN, HIGH);
-
-            if (lastState != EdgeStore::DANGER)
-            {
-                for (int i = 0; i < ALERT_CHIME_COUNT; ++i)
-                {
-                    if (liveState != EdgeStore::DANGER)
-                    {
-                        break;
-                    }
-                    playSoftChime();
-                    if (i < ALERT_CHIME_COUNT - 1)
-                    {
-                        vTaskDelay(pdMS_TO_TICKS(ALERT_CHIME_GAP_MS));
-                    }
-                }
-                buzzerOff();
-            }
         }
-        else if (current == EdgeStore::SAFE)
+        else if (modeSent == 2) // SAFE sent
         {
             digitalWrite(RED_LED_PIN, LOW);
             digitalWrite(BLUE_LED_PIN, HIGH);
-
-            // عند الرجوع من DANGER إلى SAFE: شغل البازر مع الليد الزرقاء
-            if (lastState == EdgeStore::DANGER)
-            {
-                for (int i = 0; i < ALERT_CHIME_COUNT; ++i)
-                {
-                    if (liveState != EdgeStore::SAFE)
-                    {
-                        break;
-                    }
-                    playSoftChime();
-                    if (i < ALERT_CHIME_COUNT - 1)
-                    {
-                        vTaskDelay(pdMS_TO_TICKS(ALERT_CHIME_GAP_MS));
-                    }
-                }
-                buzzerOff();
-            }
-            else
-            {
-                buzzerOff();
-            }
         }
         else
         {
-            buzzerOff();
             allIndicatorsOff();
         }
 
-        lastState = current;
+        // تشغيل البازر فقط عند نجاح إرسال حدث جديد
+        if (triggerChimeOnSent)
+        {
+            triggerChimeOnSent = false;
+            for (int i = 0; i < ALERT_CHIME_COUNT; ++i)
+            {
+                playSoftChime();
+                if (i < ALERT_CHIME_COUNT - 1)
+                {
+                    vTaskDelay(pdMS_TO_TICKS(ALERT_CHIME_GAP_MS));
+                }
+            }
+            buzzerOff();
+        }
+
         vTaskDelay(pdMS_TO_TICKS(150));
     }
 }
@@ -587,6 +592,62 @@ void changeMachineState(
     if (outbox.transition(target, event, enqueued))
     {
         liveState = target;
+        Serial.printf("[STATE] Confirmed transition -> %s (enqueued=%d)\n",
+                      stateName(liveState), enqueued ? 1 : 0);
+    }
+}
+
+// تقييم مرشح الحالة: لا يتم اعتماد التحول إلا بعد 3 قراءات متتالية مخالفة للحالة الحالية
+void evaluateConfirmedTransition(float risk, const SensorData &s)
+{
+    State readingState = liveState;
+
+    if (risk >= RISK_ALERT_THRESHOLD)
+    {
+        readingState = EdgeStore::DANGER;
+    }
+    else if (risk < RISK_RESET_THRESHOLD)
+    {
+        readingState = EdgeStore::SAFE;
+    }
+    else
+    {
+        // في منطقة الـ Hysteresis (بين 60% و 80%): نصفّر عداد التغيير المقترح
+        candidateState = liveState;
+        candidateCount = 0;
+        return;
+    }
+
+    // لو القراءة مطابقة للحالة الحالية المؤكدة فلا يوجد تحويل
+    if (readingState == liveState)
+    {
+        candidateState = liveState;
+        candidateCount = 0;
+        return;
+    }
+
+    // القراءة تشير لحالة مختلفة عن الحالة الحالية
+    if (readingState == candidateState)
+    {
+        candidateCount++;
+    }
+    else
+    {
+        candidateState = readingState;
+        candidateCount = 1;
+    }
+
+    Serial.printf("[CONFIRM] Candidate %s: %d/%d\n",
+                  stateName(candidateState),
+                  candidateCount,
+                  STATE_CONFIRM_SAMPLES);
+
+    if (candidateCount >= STATE_CONFIRM_SAMPLES)
+    {
+        State confirmedTarget = candidateState;
+        candidateCount = 0;
+        candidateState = confirmedTarget;
+        changeMachineState(confirmedTarget, s, risk);
     }
 }
 
@@ -625,7 +686,7 @@ void updateDisplay(float risk, const char *state)
         display.print("--%");
     }
 
-    // السطر الثاني: Mode: SAFE / DANGER
+    // السطر الثاني: Mode: Danger / Safe
     display.setTextSize(1);
     display.setCursor(0, 32);
     display.print("Mode:");
@@ -688,15 +749,8 @@ void Task_Sampling(void *pv)
             }
             smoothedRisk = clamp01(smoothedRisk);
 
-            // تحديث الحالة وحفظها في NVS عند عبور العتبات
-            if (smoothedRisk >= RISK_ALERT_THRESHOLD)
-            {
-                changeMachineState(EdgeStore::DANGER, s, smoothedRisk);
-            }
-            else if (smoothedRisk < RISK_RESET_THRESHOLD)
-            {
-                changeMachineState(EdgeStore::SAFE, s, smoothedRisk);
-            }
+            // التحقق من وجود 3 قراءات متتالية لتحويل الحالة
+            evaluateConfirmedTransition(smoothedRisk, s);
 
             Serial.printf(
                 "[LIVE] T=%.2f C | I=%.2f A | V=%.3f | Risk=%.1f%% | Mode=%s\n",
@@ -706,7 +760,7 @@ void Task_Sampling(void *pv)
                 smoothedRisk * 100.0f,
                 stateName(liveState));
 
-            updateDisplay(smoothedRisk, stateName(liveState));
+            updateDisplay(smoothedRisk, oledRiskLabel(smoothedRisk));
         }
         else
         {
@@ -1093,6 +1147,17 @@ void Task_Network(void *pv)
                 if (postWebhook(pending))
                 {
                     outbox.acknowledge(pending.deviceId, pending.eventId);
+
+                    if (strcmp(pending.mode, "DANGER") == 0)
+                    {
+                        sentAlertMode = 1;
+                        triggerChimeOnSent = true;
+                    }
+                    else if (strcmp(pending.mode, "SAFE") == 0)
+                    {
+                        sentAlertMode = 2;
+                        triggerChimeOnSent = true;
+                    }
                 }
                 else
                 {
@@ -1168,6 +1233,8 @@ void setup()
         fatalError("PersistentOutbox NVS init failed");
     }
     liveState = outbox.state();
+    candidateState = liveState;
+    candidateCount = 0;
 
     if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(250)) == pdTRUE)
     {
@@ -1196,7 +1263,7 @@ void setup()
 
     bootId = esp_random();
 
-    updateDisplay(NAN, stateName(liveState));
+    updateDisplay(NAN, oledRiskLabel(NAN));
 
     xTaskCreatePinnedToCore(Task_Alert, "Alert", 3072, nullptr, 2, &alertHandle, 1);
     xTaskCreatePinnedToCore(Task_Inference, "Inference", 8192, nullptr, 2, &inferenceHandle, 0);
