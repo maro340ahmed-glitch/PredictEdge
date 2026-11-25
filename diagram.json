@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "author": "PredictEdge",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "chip-max6675",
+      "id": "max6675",
+      "top": 240,
+      "left": -140,
+      "attrs": {
+        "temperature": "30",
+        "openCircuit": "0"
+      }
+    },
+    {
+      "type": "wokwi-mpu6050",
+      "id": "mpu",
+      "top": 130,
+      "left": 195,
+      "attrs": {}
+    },
+    {
+      "type": "board-ssd1306",
+      "id": "oled",
+      "top": -160,
+      "left": 200,
+      "attrs": {
+        "i2cAddress": "0x3c"
+      }
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "current",
+      "top": -30,
+      "left": -225,
+      "attrs": {
+        "value": "512"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "redLed",
+      "top": -155,
+      "left": -120,
+      "attrs": {
+        "color": "red",
+        "label": "DANGER"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "redResistor",
+      "top": -110,
+      "left": -115,
+      "attrs": {
+        "value": "330"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "blueLed",
+      "top": -155,
+      "left": -240,
+      "attrs": {
+        "color": "blue",
+        "label": "SAFE"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "blueResistor",
+      "top": -110,
+      "left": -235,
+      "attrs": {
+        "value": "330"
+      }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer",
+      "top": -215,
+      "left": -15,
+      "attrs": {
+        "volume": "0.5"
+      }
+    }
+  ],
+  "connections": [
+    ["esp:TX", "$serialMonitor:RX", "", []],
+    ["esp:RX", "$serialMonitor:TX", "", []],
+
+    ["esp:3V3", "max6675:VCC", "red", []],
+    ["esp:GND.1", "max6675:GND", "black", []],
+    ["esp:33", "max6675:SCK", "yellow", []],
+    ["esp:32", "max6675:CS", "green", []],
+    ["esp:25", "max6675:SO", "blue", []],
+
+    ["esp:3V3", "oled:VCC", "red", []],
+    ["esp:GND.1", "oled:GND", "black", []],
+    ["esp:21", "oled:SDA", "blue", []],
+    ["esp:22", "oled:SCL", "yellow", []],
+
+    ["esp:3V3", "mpu:VCC", "red", []],
+    ["esp:GND.2", "mpu:GND", "black", []],
+    ["esp:21", "mpu:SDA", "blue", []],
+    ["esp:22", "mpu:SCL", "yellow", []],
+    ["mpu:AD0", "esp:GND.2", "black", []],
+
+    ["esp:3V3", "current:VCC", "red", []],
+    ["esp:GND.1", "current:GND", "black", []],
+    ["esp:34", "current:SIG", "green", []],
+
+    ["esp:14", "redResistor:1", "red", []],
+    ["redResistor:2", "redLed:A", "red", []],
+    ["redLed:C", "esp:GND.1", "black", []],
+
+    ["esp:13", "blueResistor:1", "blue", []],
+    ["blueResistor:2", "blueLed:A", "blue", []],
+    ["blueLed:C", "esp:GND.1", "black", []],
+
+    ["esp:27", "buzzer:2", "orange", []],
+    ["buzzer:1", "esp:GND.1", "black", []]
+  ],
+  "dependencies": {}
+}
