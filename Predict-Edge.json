@@ -1,0 +1,286 @@
+{
+  "name": "Predict-Edge",
+  "nodes": [
+    {
+      "parameters": {
+        "multipleMethods": true,
+        "path": "PREDICT-EDGE",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        48
+      ],
+      "id": "f78362cf-819f-4963-bf11-67ab9a3520c5",
+      "name": "Webhook",
+      "webhookId": "4b825bcf-44b9-4294-bf60-589641c8af76"
+    },
+    {
+      "parameters": {
+        "useCustomSchema": true,
+        "tableId": "machine_events",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "time",
+              "fieldValue": "={{ $json.time }}"
+            },
+            {
+              "fieldId": "machine",
+              "fieldValue": "={{ $json.machine }}"
+            },
+            {
+              "fieldId": "mode",
+              "fieldValue": "={{ $json.mode }}"
+            },
+            {
+              "fieldId": "device_id",
+              "fieldValue": "={{ $json.device_id }}"
+            },
+            {
+              "fieldId": "boot_id",
+              "fieldValue": "={{ $json.boot_id }}"
+            },
+            {
+              "fieldId": "temperature",
+              "fieldValue": "={{ $json.temperature }}"
+            },
+            {
+              "fieldId": "event_id",
+              "fieldValue": "={{ $json.event_id }}"
+            },
+            {
+              "fieldId": "risk_score",
+              "fieldValue": "={{ $json.risk_score }}"
+            },
+            {
+              "fieldId": "current",
+              "fieldValue": "={{ $json.current }}"
+            },
+            {
+              "fieldId": "vibration",
+              "fieldValue": "={{ $json.vibration }}"
+            },
+            {
+              "fieldId": "date",
+              "fieldValue": "={{ $json.date }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        512,
+        0
+      ],
+      "id": "0f1ecd79-221d-4487-a3b5-97c84f2ba102",
+      "name": "Create a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "YqU70mThG5dPeRQN",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst now = new Date();\n\nlet mode = data.body.mode;\nif (mode === \"DANGER\") {\n    mode = \"Danger\";\n} else {\n    mode = \"Safe\";\n}\n\n// لو date جاي null أو فاضي، استخدم التاريخ الحالي بصيغة YYYY-MM-DD\nconst date = data.body.date\n    ? String(data.body.date)\n    : now.toISOString().slice(0, 10);\n\nlet hours, minutes, seconds;\n\n// لو time جاي null أو فاضي، استخدم الوقت الحالي، وإلا قسّم الوقت القادم\nif (data.body.time && typeof data.body.time === \"string\" && data.body.time.trim() !== \"\") {\n    [hours, minutes, seconds] = data.body.time.split(\":\").map(Number);\n} else {\n    hours = now.getHours();\n    minutes = now.getMinutes();\n    seconds = now.getSeconds();\n}\n\nhours = Number.isFinite(hours) ? hours : now.getHours();\nminutes = Number.isFinite(minutes) ? minutes : now.getMinutes();\nseconds = Number.isFinite(seconds) ? seconds : now.getSeconds();\n\nconst period = hours >= 12 ? \"PM\" : \"AM\";\nconst hours12 = hours % 12 || 12;\n\nconst updatedTime =\n    `${hours12}:${String(minutes).padStart(2, \"0\")}:${String(seconds).padStart(2, \"0\")} ${period}`;\n\nreturn [\n    {\n        json: {\n            machine: data.body.machine,\n            mode: mode,\n            temperature: data.body.temperature,\n            device_id: data.body.device_id,\n            boot_id: data.body.boot_id,\n            event_id: data.body.event_id,\n            risk_score: data.body.risk_score,\n            current: data.body.current,\n            vibration: data.body.vibration,\n            date: date,\n            time: updatedTime\n        }\n    }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        48
+      ],
+      "id": "e2596d55-916c-42b9-97da-7a1e99b0bc76",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v27.0/925883180618623/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer EAA9vpNPJUSUBRyS4nZA9OlSZCvlIH1b26dJRzLJoX5RweKe7Iw7xCxwPBMXxfDZBEF3wBPjDVeqGKsTVK6ZArJFp6pHi4YO4uEtH7t385jf48oxHiv9zgZBCPbJeIIhCrdMHbELEi1dyQrkcqoaKB4SvkOiZAU5ZCZAGPhTvkuoN9ldjcUQuTmin752JPqcp6QZDZD"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=\n{{ JSON.stringify({\n  messaging_product: \"whatsapp\",\n  recipient_type: \"individual\",\n  to: String($json.phoneNumber),\n  type: \"text\",\n  text: {\n    preview_url: false,\n    body: $json.message\n  }\n}) }}\n",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1200,
+        64
+      ],
+      "id": "24b40d6f-9635-4532-808c-72676716874d",
+      "name": "send massage of whats"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawInput = $input.first().json;\n\n// Access the JSON data\nconst data = rawInput.data?.[0] ?? rawInput;\nconst now = new Date();\n\n// Format the date (fallback to current date if missing/null)\nconst date = data.date || now.toISOString().slice(0, 10);\n\n// Format the time from 24-hour to 12-hour format (fallback to current time if missing/null)\nlet hours, minutes, seconds;\nif (typeof data.time === \"string\" && data.time.trim() !== \"\") {\n    [hours, minutes, seconds] = data.time.split(\":\").map(Number);\n} else {\n    hours = now.getHours();\n    minutes = now.getMinutes();\n    seconds = now.getSeconds();\n}\n\nhours = Number.isFinite(hours) ? hours : now.getHours();\nminutes = Number.isFinite(minutes) ? minutes : now.getMinutes();\nseconds = Number.isFinite(seconds) ? seconds : now.getSeconds();\n\nconst period = hours >= 12 ? \"PM\" : \"AM\";\nconst formattedHours = hours % 12 || 12;\n\nconst formattedTime =\n    `${formattedHours}:${String(minutes).padStart(2, \"0\")}:${String(seconds).padStart(2, \"0\")} ${period}`;\n\n// Format the machine mode and status icon like the screenshot\nconst isDanger = String(data.mode || \"\").toUpperCase() === \"DANGER\";\nconst mode = isDanger ? \"Danger\" : \"Safe\";\nconst statusIcon = isDanger ? \"🔴\" : \"🟢\";\n\n// Build the report\nlet message = `🏭 *Machine Health Report — NileFlow AI*\\n`;\nmessage += `═══════════════════════\\n`;\nmessage += `\\n`;\nmessage += `⚙️ *Machine Information*\\n`;\nmessage += `🔹 *Machine:* ${data.machine || \"Unknown\"}\\n`;\nmessage += `🆔 *Device ID:* ${data.device_id}\\n`;\nmessage += `🔄 *Boot ID:* ${data.boot_id}\\n`;\nmessage += `📌 *Event ID:* ${data.event_id}\\n`;\nmessage += `\\n`;\nmessage += `🚨 *Machine Status*\\n`;\nmessage += `${statusIcon} *Mode:* ${mode}\\n`;\nmessage += `📊 *Risk Score:* ${Number(data.risk_score).toFixed(2)}\\n`;\nmessage += `\\n`;\nmessage += `🌡️ *Sensor Readings*\\n`;\nmessage += `🌡️ *Temperature:* ${data.temperature} °C\\n`;\nmessage += `⚡ *Current:* ${data.current} A\\n`;\nmessage += `📳 *Vibration:* ${data.vibration}\\n`;\nmessage += `\\n`;\nmessage += `📅 *Event Date:* ${date}\\n`;\nmessage += `🕒 *Event Time:* ${formattedTime}\\n`;\nmessage += `═══════════════════════`;\n\nreturn [\n    {\n        json: {\n            message: message,\n            machine: data.machine,\n            mode: mode,\n            date: date,\n            time: formattedTime,\n            phoneNumber: \"201028086887\"\n        }\n    }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "id": "0a28fa6f-a0f3-41e3-8559-9afd7e0b7b43",
+      "name": "put data in list and more than a ane mass"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}\n",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        176,
+        -112
+      ],
+      "id": "17bb0a05-97ae-4b29-8295-82f4e00c2352",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v27.0/925883180618623/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer EAA9vpNPJUSUBRyS4nZA9OlSZCvlIH1b26dJRzLJoX5RweKe7Iw7xCxwPBMXxfDZBEF3wBPjDVeqGKsTVK6ZArJFp6pHi4YO4uEtH7t385jf48oxHiv9zgZBCPbJeIIhCrdMHbELEi1dyQrkcqoaKB4SvkOiZAU5ZCZAGPhTvkuoN9ldjcUQuTmin752JPqcp6QZDZD"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=\n{{ JSON.stringify({\n  messaging_product: \"whatsapp\",\n  recipient_type: \"individual\",\n  to: \"201028086887\",\n  type: \"text\",\n  text: {\n    preview_url: false,\n    body:\"Every alert is backed by validated, persistent sensor data — zero guesswork, zero lost events\"\n  }\n}) }}\n",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        256,
+        224
+      ],
+      "id": "2d57b8bf-5a90-49c4-9cb8-cca15c4fd9f0",
+      "name": "send massage of whats1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "send massage of whats1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "put data in list and more than a ane mass": {
+      "main": [
+        [
+          {
+            "node": "send massage of whats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row": {
+      "main": [
+        [
+          {
+            "node": "put data in list and more than a ane mass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d71bada4-cce0-4948-b3f1-784ade42b424",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "35b218322998d7f46d46e7f5e8581e9b6b83290e2f25e58c03af633de092e711"
+  },
+  "nodeGroups": [],
+  "id": "QMVurIAV3IfmpS1N",
+  "tags": []
+}
