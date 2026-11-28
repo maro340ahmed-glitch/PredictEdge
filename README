@@ -12,4 +12,5 @@ An industrial predictive maintenance system combining embedded firmware, electri
 ---
 
 ### Project Structure Note (`include/`)
-This directory contains `.h` header files for shared C/C++ declarations and macro definitions included via `#include "header.h"` in `src/`, keeping definitions centralized and avoiding duplication. For more details, see the [GCC Header Files Documentation](https://gcc.gnu.org/onlinedocs/cpp/Header-Files.html).
+This directory contains `.h` header files for shared C/C++ declarations and macro definitions included via `#include "header.h"` in `src/`, keeping definitions
+centralized and avoiding duplication. For more details, see the [GCC Header Files Documentation](https://gcc.gnu.org/onlinedocs/cpp/Header-Files.html).
